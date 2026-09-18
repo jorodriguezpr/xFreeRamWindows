@@ -45,6 +45,10 @@ explicitly chosen, then restores the stopped services on demand.
 6. The tray icon's tooltip and context menu show live free RAM and an estimated
    CPU% at all times, refreshed every 1.5s — independent of whether Boost is
    active.
+7. **About...** shows developer/contact info, license, and a link back to this
+   repo.
+
+   ![About dialog](screenshots/about.png)
 
 > Screenshots above use fabricated service/process names for illustration —
 > not a real machine's data.

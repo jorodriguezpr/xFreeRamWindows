@@ -16,6 +16,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _targetLabelItem;
     private readonly ToolStripMenuItem _statsLabelItem;
     private readonly ToolStripMenuItem _autoStartItem;
+    private readonly ToolStripMenuItem _aboutItem;
     private readonly System.Windows.Forms.Timer _statsTimer;
     private readonly AppSettings _settings;
 
@@ -32,6 +33,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _boostItem = new ToolStripMenuItem("Boost Now", null, OnBoost);
         _restoreItem = new ToolStripMenuItem("Restore", null, OnRestore) { Enabled = false };
         _autoStartItem = new ToolStripMenuItem("Start with Windows", null, OnToggleAutoStart) { Checked = AutoStartManager.IsEnabled() };
+        _aboutItem = new ToolStripMenuItem("About...", null, OnAbout);
         var exitItem = new ToolStripMenuItem("Exit", null, OnExit);
 
         var menu = new ContextMenuStrip();
@@ -48,6 +50,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_autoStartItem);
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(_aboutItem);
         menu.Items.Add(exitItem);
 
         _trayIcon = new NotifyIcon
@@ -201,6 +204,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
+    }
+
+    private void OnAbout(object? sender, EventArgs e)
+    {
+        using var dialog = new AboutForm();
+        dialog.ShowDialog();
     }
 
     private void OnExit(object? sender, EventArgs e)
