@@ -105,10 +105,18 @@ skipped item, not an error.
 
 ## Install
 
-Download the latest `xFreeRamWindows-win-x64.zip` from the
-[Releases](https://github.com/jorodriguezpr/xFreeRamWindows/releases) page,
-extract it anywhere, and run `xFreeRamWindows.exe`. Windows will prompt for
-elevation (UAC) on launch — this is required, not optional.
+Download the latest `xFreeRamWindows-*-win-x64.zip` from the
+[Releases](https://github.com/jorodriguezpr/xFreeRamWindows/releases) page and
+extract it. Two options from there:
+
+- **Just run it**: run `xFreeRamWindows.exe` directly from the extracted
+  folder. Windows will prompt for elevation (UAC) on launch — this is
+  required, not optional.
+- **Install it**: right-click `install.ps1` → Run with PowerShell (or run it
+  from an elevated PowerShell prompt). Copies the app to
+  `Program Files\xFreeRamWindows` and adds Start Menu + Desktop shortcuts.
+  `uninstall.ps1` removes it again (add `-RemoveConfig` to also delete saved
+  service/process selections from `%APPDATA%\xFreeRamWindows`).
 
 ## Build from source
 
