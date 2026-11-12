@@ -12,6 +12,15 @@ internal sealed class AppSettings
     public List<string> ServicesToStop { get; set; } = new();
     public List<string> ProcessesToStop { get; set; } = new();
 
+    // Auto Free RAM: while the app runs, free RAM by itself when memory gets tight.
+    // Only the safe "Free Up RAM Now" pass is used — never closes apps or stops services.
+    public bool AutoFreeEnabled { get; set; } = true;
+    /// <summary>Free RAM when this percent of memory (or more) is in use.</summary>
+    public int AutoFreeThresholdPercent { get; set; } = 80;
+    /// <summary>Never run more often than this, however high memory use is.</summary>
+    public int AutoFreeIntervalMinutes { get; set; } = 10;
+    public bool AutoFreeNotify { get; set; } = false;
+
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "xFreeRamWindows", "settings.json");

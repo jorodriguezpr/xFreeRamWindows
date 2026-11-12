@@ -112,7 +112,9 @@ internal static class BoostEngine
     /// list. Doesn't close anything or touch services — safe to run any time, no confirmation
     /// needed, unlike <see cref="Boost"/>.
     /// </summary>
-    public static FreeRamResult FreeUpRamNow()
+    /// <param name="skipProcessIds">Processes left untouched (Auto Free RAM passes the app
+    /// the user is working in and the Boost target, so they never stutter).</param>
+    public static FreeRamResult FreeUpRamNow(IReadOnlySet<int>? skipProcessIds = null)
     {
         var before = SystemStats.GetMemoryStatus().AvailableMB;
         var result = new FreeRamResult();
@@ -121,6 +123,7 @@ internal static class BoostEngine
         {
             using (process)
             {
+                if (skipProcessIds is not null && skipProcessIds.Contains(process.Id)) continue;
                 try
                 {
                     NativeMethods.TryTrimWorkingSet(process.Handle);

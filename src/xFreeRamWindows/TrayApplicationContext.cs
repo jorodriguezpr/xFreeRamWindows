@@ -2,6 +2,8 @@
 // Email: jrpcone@gmail.com
 // GitHub: https://github.com/jorodriguezpr
 
+using xFreeRamWindows.Models;
+
 namespace xFreeRamWindows;
 
 internal sealed class TrayApplicationContext : ApplicationContext
@@ -18,11 +20,51 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _autoStartItem;
     private readonly ToolStripMenuItem _aboutItem;
     private readonly System.Windows.Forms.Timer _statsTimer;
+    private readonly System.Windows.Forms.Timer _autoFreeTimer;
     private readonly AppSettings _settings;
+    private readonly AutoFreeMonitor _autoFree;
+    private readonly ToolStripMenuItem _autoFreeMenu;
+    private readonly ToolStripMenuItem _autoFreeEnabledItem;
+    private readonly ToolStripMenuItem _autoFreeThresholdMenu;
+    private readonly ToolStripMenuItem _autoFreeIntervalMenu;
+    private readonly ToolStripMenuItem _autoFreeNotifyItem;
+    private readonly ToolStripMenuItem _autoFreeStatusItem;
+    private double _lastCpu;
+
+    private static readonly int[] ThresholdChoices = { 60, 70, 80, 90 };
+    private static readonly int[] IntervalChoices = { 5, 10, 15, 30, 60 };
 
     public TrayApplicationContext()
     {
         _settings = AppSettings.Load();
+        if (!ThresholdChoices.Contains(_settings.AutoFreeThresholdPercent)) _settings.AutoFreeThresholdPercent = 80;
+        if (!IntervalChoices.Contains(_settings.AutoFreeIntervalMinutes)) _settings.AutoFreeIntervalMinutes = 10;
+        _autoFree = new AutoFreeMonitor(_settings);
+        _autoFree.Freed += OnAutoFreed;
+
+        _autoFreeEnabledItem = new ToolStripMenuItem("On", null, OnToggleAutoFree) { Checked = _settings.AutoFreeEnabled };
+        _autoFreeThresholdMenu = new ToolStripMenuItem("When RAM in use is at least");
+        foreach (var pct in ThresholdChoices)
+        {
+            _autoFreeThresholdMenu.DropDownItems.Add(new ToolStripMenuItem($"{pct}%", null, (_, _) => SetThreshold(pct))
+                { Checked = pct == _settings.AutoFreeThresholdPercent, Tag = pct });
+        }
+        _autoFreeIntervalMenu = new ToolStripMenuItem("At most every");
+        foreach (var min in IntervalChoices)
+        {
+            _autoFreeIntervalMenu.DropDownItems.Add(new ToolStripMenuItem($"{min} minutes", null, (_, _) => SetInterval(min))
+                { Checked = min == _settings.AutoFreeIntervalMinutes, Tag = min });
+        }
+        _autoFreeNotifyItem = new ToolStripMenuItem("Notify me each time", null, OnToggleAutoFreeNotify) { Checked = _settings.AutoFreeNotify };
+        _autoFreeStatusItem = new ToolStripMenuItem("Last run: not yet") { Enabled = false };
+        _autoFreeMenu = new ToolStripMenuItem("Auto Free RAM");
+        _autoFreeMenu.DropDownItems.Add(_autoFreeEnabledItem);
+        _autoFreeMenu.DropDownItems.Add(_autoFreeThresholdMenu);
+        _autoFreeMenu.DropDownItems.Add(_autoFreeIntervalMenu);
+        _autoFreeMenu.DropDownItems.Add(_autoFreeNotifyItem);
+        _autoFreeMenu.DropDownItems.Add(new ToolStripSeparator());
+        _autoFreeMenu.DropDownItems.Add(_autoFreeStatusItem);
+        _autoFreeMenu.DropDownItems.Add(new ToolStripMenuItem("Never closes apps or stops services") { Enabled = false });
 
         _statsLabelItem = new ToolStripMenuItem("RAM: -- | CPU: --") { Enabled = false };
         _targetLabelItem = new ToolStripMenuItem("Target: (none selected)") { Enabled = false };
@@ -41,6 +83,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(_targetLabelItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_freeRamItem);
+        menu.Items.Add(_autoFreeMenu);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_selectTargetItem);
         menu.Items.Add(_selectServicesItem);
@@ -65,14 +108,76 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _statsTimer.Tick += (_, _) => RefreshStats();
         _statsTimer.Start();
 
+        _autoFreeTimer = new System.Windows.Forms.Timer { Interval = AutoFreeMonitor.CheckSeconds * 1000 };
+        _autoFreeTimer.Tick += (_, _) => _autoFree.Check(_lastCpu);
+        _autoFreeTimer.Start();
+
         RefreshTargetLabel();
         RefreshStats();
+        RefreshAutoFreeLabels();
+    }
+
+    private void RefreshAutoFreeLabels()
+    {
+        _autoFreeMenu.Text = _settings.AutoFreeEnabled
+            ? $"Auto Free RAM: on (at {_settings.AutoFreeThresholdPercent}%)"
+            : "Auto Free RAM: off";
+        _autoFreeStatusItem.Text = _autoFree.LastRunAt is { } at && _autoFree.LastResult is { } r
+            ? $"Last run: {at:HH:mm}, {Math.Max(0, r.FreedMB):N0} MB freed"
+            : "Last run: not yet";
+        foreach (ToolStripMenuItem item in _autoFreeThresholdMenu.DropDownItems)
+            item.Checked = (int)item.Tag! == _settings.AutoFreeThresholdPercent;
+        foreach (ToolStripMenuItem item in _autoFreeIntervalMenu.DropDownItems)
+            item.Checked = (int)item.Tag! == _settings.AutoFreeIntervalMinutes;
+    }
+
+    private void OnToggleAutoFree(object? sender, EventArgs e)
+    {
+        _settings.AutoFreeEnabled = !_settings.AutoFreeEnabled;
+        _autoFreeEnabledItem.Checked = _settings.AutoFreeEnabled;
+        _settings.Save();
+        RefreshAutoFreeLabels();
+    }
+
+    private void OnToggleAutoFreeNotify(object? sender, EventArgs e)
+    {
+        _settings.AutoFreeNotify = !_settings.AutoFreeNotify;
+        _autoFreeNotifyItem.Checked = _settings.AutoFreeNotify;
+        _settings.Save();
+    }
+
+    private void SetThreshold(int pct)
+    {
+        _settings.AutoFreeThresholdPercent = pct;
+        _settings.Save();
+        RefreshAutoFreeLabels();
+    }
+
+    private void SetInterval(int minutes)
+    {
+        _settings.AutoFreeIntervalMinutes = minutes;
+        _settings.Save();
+        RefreshAutoFreeLabels();
+    }
+
+    private void OnAutoFreed(FreeRamResult result)
+    {
+        RefreshStats();
+        RefreshAutoFreeLabels();
+        if (!_settings.AutoFreeNotify) return;
+
+        _trayIcon.BalloonTipTitle = "RAM freed automatically";
+        _trayIcon.BalloonTipText = result.FreedMB > 0
+            ? $"~{result.FreedMB:N0} MB more free now."
+            : "Memory is in use by running apps; nothing more to free right now.";
+        _trayIcon.ShowBalloonTip(3000);
     }
 
     private void RefreshStats()
     {
         var mem = SystemStats.GetMemoryStatus();
         var cpu = SystemStats.SampleCpuUsagePercent();
+        _lastCpu = cpu;
 
         _statsLabelItem.Text = $"RAM free: {mem.AvailableMB:N0} MB / {mem.TotalMB:N0} MB | CPU: {cpu:F0}%";
 
@@ -215,6 +320,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private void OnExit(object? sender, EventArgs e)
     {
         _statsTimer.Stop();
+        _autoFreeTimer.Stop();
         _trayIcon.Visible = false;
         Application.Exit();
     }

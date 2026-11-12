@@ -1,6 +1,7 @@
 # xFreeRamWindows
 
-A Windows 64-bit tray app that frees up RAM for one target application (e.g.
+A Windows 64-bit tray app that keeps RAM free: it frees memory automatically
+when RAM use gets high, and can free up RAM for one target application (e.g.
 VS Code) by closing processes and stopping Windows services the user has
 explicitly chosen, then restores the stopped services on demand.
 
@@ -12,6 +13,17 @@ explicitly chosen, then restores the stopped services on demand.
    running process's working set and purges the standby list. Doesn't close
    anything or touch services; just reclaims memory Windows is holding but not
    actively using.
+   - **Auto Free RAM** (tray submenu, on by default) runs this same pass by
+     itself while the app is running. Every 30 s it checks memory; when RAM in
+     use reaches your threshold (60/70/**80**/90 %) it frees RAM, at most once
+     per interval (5/**10**/15/30/60 minutes). Safety rules: it never closes
+     apps or stops services (that stays the manual, confirmed Boost Now); the
+     window you're working in, the Boost target and this app are never
+     trimmed; it waits while the CPU is ≥ 90 % busy; and when a run frees under
+     100 MB the wait doubles (up to 1 hour), because trimming memory that is
+     really in use only makes Windows page it back in. Notifications are off
+     by default ("Notify me each time"); every run is written to
+     `%APPDATA%\xFreeRamWindows\autofree.log`.
 1. Pick a target `.exe` from the tray menu (**Select Target App...**). If it
    isn't already running, Boost launches it.
 2. Pick which services Boost Now is allowed to stop (**Select Services to
@@ -97,23 +109,33 @@ skipped item, not an error.
 
 ## Requirements
 
-- Windows 11 x64
-- .NET 10 SDK (only if building from source — the release download is
-  self-contained and needs no separate .NET install)
+- Windows 10/11 x64
+- .NET 10 SDK (only if building from source — the installer and the zip are
+  self-contained and need no separate .NET install)
 - Must run elevated (the app manifest requests admin) — stopping services and
   closing other users'/elevated processes requires it.
 
 ## Install
 
-Download the latest `xFreeRamWindows-*-win-x64.zip` from the
+**Recommended:** download `xFreeRamWindows-Setup-<version>.exe` from the
 [Releases](https://github.com/jorodriguezpr/xFreeRamWindows/releases) page and
-extract it. Two options from there:
+run it. The setup wizard (English or Spanish) installs to
+`C:\Program Files\xFreeRamWindows`, adds a Start Menu shortcut, and optionally
+a Desktop shortcut and "Start with Windows". Running Setup again upgrades in
+place (it closes xFreeRamWindows first if it is running). Uninstall from
+**Settings → Apps → Installed apps** — your settings in
+`%APPDATA%\xFreeRamWindows` are kept.
+
+Windows may show "Windows protected your PC" (SmartScreen) because the
+installer is not code-signed: click **More info → Run anyway**.
+
+**Portable:** download `xFreeRamWindows-*-win-x64.zip` instead and extract it.
 
 - **Just run it**: run `xFreeRamWindows.exe` directly from the extracted
   folder. Windows will prompt for elevation (UAC) on launch — this is
   required, not optional.
-- **Install it**: right-click `install.ps1` → Run with PowerShell (or run it
-  from an elevated PowerShell prompt). Copies the app to
+- **Install it with PowerShell**: right-click `install.ps1` → Run with
+  PowerShell (or run it from an elevated PowerShell prompt). Copies the app to
   `Program Files\xFreeRamWindows` and adds Start Menu + Desktop shortcuts.
   `uninstall.ps1` removes it again (add `-RemoveConfig` to also delete saved
   service/process selections from `%APPDATA%\xFreeRamWindows`).
@@ -125,6 +147,15 @@ dotnet build src/xFreeRamWindows/xFreeRamWindows.csproj -c Release
 ```
 
 Run `src/xFreeRamWindows/bin/Release/net10.0-windows/xFreeRamWindows.exe`.
+
+To build the installer (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)):
+
+```
+powershell -ExecutionPolicy Bypass -File installer/build-installer.ps1
+```
+
+It publishes a self-contained win-x64 build and writes
+`installer/out/xFreeRamWindows-Setup-<version>.exe`.
 
 ## License
 
