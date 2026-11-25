@@ -7,6 +7,48 @@ explicitly chosen, then restores the stopped services on demand.
 
 ![Tray menu](screenshots/tray-menu.png)
 
+## New in 1.2.0: Memory Dashboard
+
+Open it from the tray menu (**Memory Dashboard...**) or by double-clicking the tray icon.
+
+- **Overview**: RAM in use, **commit** (memory programs have reserved), page file
+  use and the compressed store, with a graph of the last hour. Commit is the number
+  that really runs out: when it reaches the commit limit (RAM + page file), programs
+  fail to start or crash even if RAM still looks free.
+- **Commit warning** (on by default): a notification when commit reaches 90 %
+  (80/85/90/95), at most every 15 minutes, naming the biggest apps. Click it to
+  open the page file optimizer.
+- **Top apps**: every app's processes added together (VS Code runs ~20), sorted by
+  committed memory, with plain names for things like `WorkloadsSessionHost`
+  (Windows AI features).
+- **Page file optimizer**: shows the current page file and recommends a size from
+  the highest commit since Windows started: start at the larger of RAM (up to
+  16 GB) and that peak + 10 %; grow up to the larger of 2 x the start and the
+  peak + 50 %; never more than 3 x RAM; the drive always keeps max(20 GB, 5 %)
+  free. **Apply recommended**, **Let Windows manage it** and **Restore original**
+  change the Windows setting through WMI (the documented way), save the original
+  setting first, and take effect after a restart.
+- **Compress idle apps** (tray menu and Idle apps tab, on by default): when an app
+  in your session has not been used for 10 minutes (5/10/15/30/60) - not in front
+  and under 1 s of CPU per minute - its memory priority is lowered and its memory
+  is trimmed once, so Windows compresses it before the app you are working in.
+  As soon as you use it again, everything is put back. Optional efficiency mode
+  (EcoQoS). Per-app rules: Never touch / Default / Compress sooner (2 min).
+  Windows components, services (other sessions), the Boost target and this app
+  are never touched; nothing is closed. Log: `%APPDATA%\xFreeRamWindows\idle.log`.
+- **Compressibility test**: reads a sample of each big app's memory pages that
+  are in RAM right now (never pages it back in) and compresses each 4 KB page with
+  Windows' XPRESS compressor, like the memory compression store does. Shows the
+  ratio per app and how much compressing everything could save. Nothing read is
+  saved or sent; protected processes are skipped.
+
+Run as administrator (the default) to also see how much data Windows' own
+compression store holds and its ratio.
+
+Diagnostics (no tray): `xFreeRamWindows.exe --report <file.json> [--compress]`
+writes all readings and the page file recommendation; `--screenshots <folder>`
+saves each dashboard tab as a PNG.
+
 ## How it works
 
 0. **Free Up RAM Now** — always available, no confirmation needed. Trims every

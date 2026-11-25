@@ -2,6 +2,7 @@
 // Email: jrpcone@gmail.com
 // GitHub: https://github.com/jorodriguezpr
 
+using xFreeRamWindows.Memory;
 using xFreeRamWindows.Models;
 
 namespace xFreeRamWindows;
@@ -31,6 +32,18 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _autoFreeStatusItem;
     private double _lastCpu;
 
+    // 1.2.0
+    private readonly MemoryHistory _history = new();
+    private readonly IdleCompressor _idle;
+    private readonly System.Windows.Forms.Timer _historyTimer;
+    private readonly System.Windows.Forms.Timer _idleTimer;
+    private readonly ToolStripMenuItem _dashboardItem;
+    private readonly ToolStripMenuItem _idleItem;
+    private DashboardForm? _dashboard;
+    private DateTime _lastCommitWarningUtc = DateTime.MinValue;
+    private bool _balloonIsCommitWarning;
+    private bool _idleCheckRunning;
+
     private static readonly int[] ThresholdChoices = { 60, 70, 80, 90 };
     private static readonly int[] IntervalChoices = { 5, 10, 15, 30, 60 };
 
@@ -41,6 +54,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (!IntervalChoices.Contains(_settings.AutoFreeIntervalMinutes)) _settings.AutoFreeIntervalMinutes = 10;
         _autoFree = new AutoFreeMonitor(_settings);
         _autoFree.Freed += OnAutoFreed;
+        _idle = new IdleCompressor(_settings);
+        _dashboardItem = new ToolStripMenuItem("Memory Dashboard...", null, (_, _) => OpenDashboard(null)) { Font = new Font(SystemFonts.MenuFont ?? Control.DefaultFont, FontStyle.Bold) };
+        _idleItem = new ToolStripMenuItem("Compress Idle Apps", null, OnToggleIdle) { Checked = _settings.IdleCompressEnabled };
 
         _autoFreeEnabledItem = new ToolStripMenuItem("On", null, OnToggleAutoFree) { Checked = _settings.AutoFreeEnabled };
         _autoFreeThresholdMenu = new ToolStripMenuItem("When RAM in use is at least");
@@ -82,8 +98,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(_statsLabelItem);
         menu.Items.Add(_targetLabelItem);
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(_dashboardItem);
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_freeRamItem);
         menu.Items.Add(_autoFreeMenu);
+        menu.Items.Add(_idleItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_selectTargetItem);
         menu.Items.Add(_selectServicesItem);
@@ -103,6 +122,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
             Visible = true,
             ContextMenuStrip = menu,
         };
+        _trayIcon.DoubleClick += (_, _) => OpenDashboard(null);
+        _trayIcon.BalloonTipClicked += (_, _) =>
+        {
+            if (_balloonIsCommitWarning) OpenDashboard(DashboardForm.TabPageFile);
+        };
+        _trayIcon.BalloonTipClosed += (_, _) => _balloonIsCommitWarning = false;
 
         _statsTimer = new System.Windows.Forms.Timer { Interval = 1500 };
         _statsTimer.Tick += (_, _) => RefreshStats();
@@ -111,6 +136,24 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _autoFreeTimer = new System.Windows.Forms.Timer { Interval = AutoFreeMonitor.CheckSeconds * 1000 };
         _autoFreeTimer.Tick += (_, _) => _autoFree.Check(_lastCpu);
         _autoFreeTimer.Start();
+
+        _historyTimer = new System.Windows.Forms.Timer { Interval = 10_000 };
+        _historyTimer.Tick += async (_, _) => _history.Add(await Task.Run(() => MemorySnapshot.Take()));
+        _historyTimer.Start();
+        _history.Add(MemorySnapshot.Take());
+
+        _idleTimer = new System.Windows.Forms.Timer { Interval = IdleCompressor.CheckSeconds * 1000 };
+        _idleTimer.Tick += async (_, _) =>
+        {
+            if (_idleCheckRunning) return;
+            _idleCheckRunning = true;
+            try { await Task.Run(_idle.Check); }
+            catch { /* never break the tray app */ }
+            finally { _idleCheckRunning = false; RefreshIdleLabel(); }
+        };
+        _idleTimer.Start();
+        Application.ApplicationExit += (_, _) => _idle.RestoreAll();
+        RefreshIdleLabel();
 
         RefreshTargetLabel();
         RefreshStats();
@@ -166,6 +209,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         RefreshAutoFreeLabels();
         if (!_settings.AutoFreeNotify) return;
 
+        _balloonIsCommitWarning = false;
         _trayIcon.BalloonTipTitle = "RAM freed automatically";
         _trayIcon.BalloonTipText = result.FreedMB > 0
             ? $"~{result.FreedMB:N0} MB more free now."
@@ -179,10 +223,58 @@ internal sealed class TrayApplicationContext : ApplicationContext
         var cpu = SystemStats.SampleCpuUsagePercent();
         _lastCpu = cpu;
 
-        _statsLabelItem.Text = $"RAM free: {mem.AvailableMB:N0} MB / {mem.TotalMB:N0} MB | CPU: {cpu:F0}%";
+        var snap = MemorySnapshot.Take(includeStore: false);
+        _statsLabelItem.Text = $"RAM free: {mem.AvailableMB / 1024.0:N1} / {mem.TotalMB / 1024.0:N1} GB | Commit: {snap.CommitPercent:F0}% | CPU: {cpu:F0}%";
 
-        var tooltip = $"xFreeRamWindows | RAM free {mem.AvailableMB:N0}MB | CPU {cpu:F0}%";
+        var tooltip = $"xFreeRam | RAM free {mem.AvailableMB / 1024.0:N1} GB | Commit {snap.CommitPercent:F0}% | CPU {cpu:F0}%";
         _trayIcon.Text = tooltip.Length <= 63 ? tooltip : tooltip[..63];
+        CheckCommit(snap);
+    }
+
+    /// <summary>Commit guard: warns (at most every 15 minutes) before the commit limit is reached.</summary>
+    private void CheckCommit(MemorySnapshot snap)
+    {
+        if (!_settings.CommitWarnEnabled || snap.CommitLimit <= 0) return;
+        if (snap.CommitPercent < _settings.CommitWarnPercent) return;
+        if (DateTime.UtcNow - _lastCommitWarningUtc < TimeSpan.FromMinutes(15)) return;
+        _lastCommitWarningUtc = DateTime.UtcNow;
+
+        string top;
+        try { top = AppMemoryUsage.TopSummary(3); } catch { top = ""; }
+        _balloonIsCommitWarning = true;
+        _trayIcon.BalloonTipTitle = $"Memory almost full: {snap.CommitPercent:F0}% committed";
+        _trayIcon.BalloonTipText =
+            $"{MemorySnapshot.Gb(snap.Commit)} of {MemorySnapshot.Gb(snap.CommitLimit)} reserved. Programs may crash soon." +
+            (top.Length > 0 ? $" Biggest: {top}." : "") + " Click to raise the limit (page file).";
+        _trayIcon.ShowBalloonTip(10000);
+    }
+
+    private void OpenDashboard(string? tab)
+    {
+        if (_dashboard is null || _dashboard.IsDisposed)
+        {
+            _dashboard = new DashboardForm(_settings, _history, _idle);
+            _dashboard.FormClosed += (_, _) => { _dashboard = null; _idleItem.Checked = _settings.IdleCompressEnabled; RefreshIdleLabel(); };
+            _dashboard.Show();
+        }
+        _dashboard.ShowTab(tab ?? DashboardForm.TabOverview);
+    }
+
+    private void OnToggleIdle(object? sender, EventArgs e)
+    {
+        _settings.IdleCompressEnabled = !_settings.IdleCompressEnabled;
+        _idleItem.Checked = _settings.IdleCompressEnabled;
+        _settings.Save();
+        Task.Run(_idle.Check);
+        RefreshIdleLabel();
+    }
+
+    private void RefreshIdleLabel()
+    {
+        int n = _idle.CompressedApps;
+        _idleItem.Text = _settings.IdleCompressEnabled
+            ? $"Compress Idle Apps: on (after {_settings.IdleCompressMinutes} min{(n > 0 ? $", {n} compressed" : "")})"
+            : "Compress Idle Apps: off";
     }
 
     private void RefreshTargetLabel()
@@ -321,6 +413,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         _statsTimer.Stop();
         _autoFreeTimer.Stop();
+        _historyTimer.Stop();
+        _idleTimer.Stop();
+        _idle.RestoreAll();
+        _dashboard?.Close();
         _trayIcon.Visible = false;
         Application.Exit();
     }
