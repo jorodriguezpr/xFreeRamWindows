@@ -11,6 +11,8 @@ explicitly chosen, then restores the stopped services on demand.
 
 Open it from the tray menu (**Memory Dashboard...**) or by double-clicking the tray icon.
 
+![Memory Dashboard - Overview](screenshots/dashboard-overview.png)
+
 - **Overview**: RAM in use, **commit** (memory programs have reserved), page file
   use and the compressed store, with a graph of the last hour. Commit is the number
   that really runs out: when it reaches the commit limit (RAM + page file), programs
@@ -41,6 +43,14 @@ Open it from the tray menu (**Memory Dashboard...**) or by double-clicking the t
   Windows' XPRESS compressor, like the memory compression store does. Shows the
   ratio per app and how much compressing everything could save. Nothing read is
   saved or sent; protected processes are skipped.
+
+| Top apps | Page file |
+|---|---|
+| ![Top apps](screenshots/dashboard-apps.png) | ![Page file optimizer](screenshots/dashboard-pagefile.png) |
+| **Idle apps** | **Compressibility test** |
+| ![Compress idle apps](screenshots/dashboard-idle.png) | ![Compressibility test](screenshots/dashboard-test.png) |
+
+_Screenshots use made-up app names and readings._
 
 Run as administrator (the default) to also see how much data Windows' own
 compression store holds and its ratio.
